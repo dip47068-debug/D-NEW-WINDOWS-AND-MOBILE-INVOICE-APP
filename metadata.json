@@ -1,0 +1,6 @@
+{
+  "name": "D Billify",
+  "description": "A comprehensive Indian GST billing, A4 invoice generator, sales/purchase ledger, product inventory, debit/credit tracking, and compliance reports manager.",
+  "requestFramePermissions": ["publickey-credentials-create", "publickey-credentials-get"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
