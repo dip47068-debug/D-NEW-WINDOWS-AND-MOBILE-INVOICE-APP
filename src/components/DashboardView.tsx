@@ -121,17 +121,32 @@ export default function DashboardView({ invoices, contacts, products, userProfil
     setChatError('');
 
     try {
-      const history = updatedMessages.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }]
-      }));
+      // Filter out the initial greeting AI message if it's the first one
+      let filteredMessages = updatedMessages;
+      if (filteredMessages.length > 0 && filteredMessages[0].sender === 'ai') {
+        filteredMessages = filteredMessages.slice(1);
+      }
+
+      // Consolidate consecutive messages of the same role to prevent Gemini API errors
+      const consolidatedHistory: { role: string, parts: { text: string }[] }[] = [];
+      for (const msg of filteredMessages) {
+        const role = msg.sender === 'user' ? 'user' : 'model';
+        if (consolidatedHistory.length > 0 && consolidatedHistory[consolidatedHistory.length - 1].role === role) {
+          consolidatedHistory[consolidatedHistory.length - 1].parts[0].text += '\n\n' + msg.text;
+        } else {
+          consolidatedHistory.push({
+            role: role,
+            parts: [{ text: msg.text }]
+          });
+        }
+      }
 
       const response = await fetch('/api/gemini/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'chat',
-          history: history,
+          history: consolidatedHistory,
           context: {
             invoices,
             products,
@@ -562,49 +577,48 @@ export default function DashboardView({ invoices, contacts, products, userProfil
       </div>
 
       {/* Interactive AI Business Assistant Chat Bot */}
-      <div id="gemini-ai-chat-panel" className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-          <div className="p-2 rounded-xl bg-orange-50 text-orange-650 flex-shrink-0">
-            <Bot className="h-5 w-5 text-orange-600 animate-pulse" />
+      <div id="gemini-ai-chat-panel" className="bg-slate-900 rounded-2xl shadow-lg border border-slate-800 overflow-hidden flex flex-col mt-8">
+        <div className="flex items-center gap-3 p-4 bg-slate-900/50 border-b border-slate-800">
+          <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 flex-shrink-0">
+            <Bot className="h-5 w-5 animate-pulse" />
           </div>
           <div>
-            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-1.5 font-sans tracking-tight">
-              Interactive D Billify AI Chat Assistant
-              <span className="bg-orange-50 text-orange-700 text-[9px] font-bold px-1.5 py-0.5 rounded border border-orange-100 uppercase tracking-widest animate-pulse">
-                Active Context Aware
+            <h3 className="font-bold text-white text-sm flex items-center gap-2 font-sans tracking-tight">
+              D Billify AI Assistant
+              <span className="bg-indigo-500/20 text-indigo-300 text-[9px] font-semibold px-2 py-0.5 rounded-full border border-indigo-500/30 uppercase tracking-widest animate-pulse">
+                Live
               </span>
             </h3>
-            <p className="text-xs text-slate-500">
-              Ask questions about sales performance, invoice details, product stock levels, taxes, or request template drafts in real time.
+            <p className="text-xs text-slate-400">
+              Your context-aware copilot. Ask about sales, invoices, stock, or tax rules.
             </p>
           </div>
         </div>
 
         {userProfile?.aiEnabled === false ? (
-          <div className="p-5 bg-slate-50 rounded-xl text-center text-xs text-slate-500 font-medium">
-            🤖 AI Chat Assistant deactivated based on company security settings. Head to Settings &gt; Company Setup and enable "Enable Gemini AI Dashboard" to activate.
+          <div className="p-6 bg-slate-900 text-center text-xs text-slate-400 font-medium">
+            🤖 AI Chat Assistant deactivated based on company security settings. Head to Settings &gt; Company Setup to enable.
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-4 bg-slate-950">
             {/* Quick Prompt Suggesters */}
-            <div className="lg:col-span-1 space-y-2">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
-                💡 Instant Inquiries
+            <div className="lg:col-span-1 border-r border-slate-800 p-4 space-y-3 bg-slate-950/50">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3">
+                Suggested Actions
               </span>
               <div className="flex flex-row flex-wrap lg:flex-col gap-2">
                 {[
                   { label: "📊 June Sales Summary", prompt: "Summarize my sales performance and invoices for June 2026. What is the total volume and average ticket size?" },
                   { label: "⚠️ Find Low Stock", prompt: "Which of my products are currently low in stock? Give me a list with names and their low stock alert values." },
                   { label: "🧾 Draft Unpaid Reminder", prompt: "Draft a polite professional email reminder that I can send to a customer who has unpaid invoices." },
-                  { label: "💼 Strategies to Boost Profit", prompt: "Analyze my products and invoices to give 3 highly specific strategies for Rudra Enterprises to increase gross monthly profit next month." },
-                  { label: "📋 Explain CGST/SGST/IGST", prompt: "Explain how GST taxes (CGST, SGST, IGST) are calculated and applied to intra-state vs inter-state transactions in India." }
+                  { label: "💼 Strategies to Boost Profit", prompt: "Analyze my products and invoices to give 3 highly specific strategies to increase gross monthly profit next month." }
                 ].map((s, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => handleSendChatMessage(s.prompt)}
                     disabled={loadingChat}
-                    className="text-left w-full p-2 bg-slate-50 hover:bg-orange-50/50 hover:text-orange-950 border border-slate-100 hover:border-orange-200 rounded-xl text-[11px] font-bold text-slate-700 transition duration-150 cursor-pointer text-wrap"
+                    className="text-left w-full px-3 py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/30 rounded-xl text-xs font-medium text-slate-300 transition-colors cursor-pointer text-wrap"
                   >
                     {s.label}
                   </button>
@@ -613,19 +627,25 @@ export default function DashboardView({ invoices, contacts, products, userProfil
             </div>
 
             {/* Main Chat Interface */}
-            <div className="lg:col-span-3 flex flex-col h-[340px] border border-slate-100 rounded-xl bg-slate-50/20 overflow-hidden">
+            <div className="lg:col-span-3 flex flex-col h-[400px]">
               {/* Messages Area */}
-              <div className="flex-grow p-4 overflow-y-auto space-y-3 scrollbar-thin">
+              <div className="flex-grow p-5 overflow-y-auto space-y-4 scrollbar-thin">
+                {chatMessages.length === 0 && (
+                  <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3 opacity-50">
+                    <Bot className="h-10 w-10 mb-2" />
+                    <p className="text-sm font-medium">How can I help you today?</p>
+                  </div>
+                )}
                 {chatMessages.map((msg, i) => (
                   <div key={i} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
+                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-[13px] leading-relaxed shadow-sm ${
                       msg.sender === 'user'
-                        ? 'bg-slate-900 text-white font-semibold rounded-tr-none'
-                        : 'bg-white text-slate-900 border border-slate-100 shadow-sm font-medium rounded-tl-none whitespace-pre-wrap'
+                        ? 'bg-indigo-600 text-white font-medium rounded-tr-sm'
+                        : 'bg-slate-800 text-slate-200 border border-slate-700 font-normal rounded-tl-sm whitespace-pre-wrap'
                     }`}>
                       {msg.sender === 'ai' && (
-                        <div className="flex items-center gap-1.5 mb-1 text-[9px] font-black text-orange-600 uppercase tracking-widest border-b border-dashed border-slate-100 pb-0.5 select-none">
-                          <Bot className="h-3 w-3 text-orange-500 animate-pulse" /> D Billify AI
+                        <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold text-indigo-400 uppercase tracking-wider pb-1 border-b border-slate-700 select-none">
+                          <Bot className="h-3 w-3" /> Assistant
                         </div>
                       )}
                       {msg.text}
@@ -635,16 +655,16 @@ export default function DashboardView({ invoices, contacts, products, userProfil
                 
                 {loadingChat && (
                   <div className="flex justify-start">
-                    <div className="bg-white border border-slate-100 rounded-2xl p-3 text-xs text-slate-500 rounded-tl-none flex items-center gap-2 shadow-sm font-semibold">
-                      <Bot className="h-3.5 w-3.5 animate-spin text-orange-500" />
-                      Gemini is formulating business advisory...
+                    <div className="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-xs text-slate-400 rounded-tl-sm flex items-center gap-2 shadow-sm font-medium">
+                      <Bot className="h-4 w-4 animate-spin text-indigo-400" />
+                      Thinking...
                     </div>
                   </div>
                 )}
 
                 {chatError && (
-                  <div className="p-2.5 bg-red-50 text-red-700 rounded-xl text-[11px] border border-red-100">
-                    ⚠️ Error: {chatError}
+                  <div className="p-3 bg-red-500/10 text-red-400 rounded-xl text-xs border border-red-500/20 flex items-center gap-2">
+                    <span className="font-bold">Error:</span> {chatError}
                   </div>
                 )}
                 
@@ -654,22 +674,22 @@ export default function DashboardView({ invoices, contacts, products, userProfil
               {/* Chat Input form */}
               <form 
                 onSubmit={(e) => { e.preventDefault(); handleSendChatMessage(); }}
-                className="p-2 border-t border-slate-100 bg-white flex items-center gap-2"
+                className="p-3 border-t border-slate-800 bg-slate-900 flex items-center gap-3"
               >
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   disabled={loadingChat}
-                  placeholder="Ask Gemini about sales, draft emails, check inventory..."
-                  className="flex-grow px-3 py-2 bg-slate-50 border border-slate-250 rounded-xl text-xs focus:outline-none focus:border-orange-500 disabled:text-slate-400 font-medium"
+                  placeholder="Ask a question or request a task..."
+                  className="flex-grow px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-50 transition-colors font-medium placeholder:text-slate-600"
                 />
                 <button
                   type="submit"
                   disabled={loadingChat || !chatInput.trim()}
-                  className="p-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-100 text-white disabled:text-slate-400 rounded-xl transition cursor-pointer shrink-0"
+                  className="p-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white disabled:text-slate-600 rounded-xl transition-colors cursor-pointer shrink-0 shadow-sm"
                 >
-                  <Send className="h-4 w-4" />
+                  <Send className="h-5 w-5" />
                 </button>
               </form>
             </div>

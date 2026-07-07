@@ -1,8 +1,30 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Individual users can read and write their own data
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Licenses collection
+    match /licenses/{licenseKey=**} {
+      allow read, write: if true;
+    }
+
+    // Audit logs
+    match /admin_audit_logs/{logId=**} {
+      allow read, write: if true;
+    }
+
+    // Admin configuration settings
+    match /admin_config/{configId=**} {
+      allow read, write: if true;
+    }
+
+    // Default deny catch-all - MOVE TO BOTTOM
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

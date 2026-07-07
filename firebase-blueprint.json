@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Data",
+      "description": "GST Billing app user profile and billing records",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "companySettings": { "type": "object" },
+        "products": { "type": "array" },
+        "contacts": { "type": "array" },
+        "invoices": { "type": "array" },
+        "transactions": { "type": "array" }
+      }
+    },
+    "License": {
+      "title": "License Activation",
+      "description": "Device and time binding license for application access control",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "activationDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "expiryTime": { "type": "string" },
+        "durationDays": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "disabled", "pending"] },
+        "createdAt": { "type": "string" },
+        "history": { "type": "array" }
+      },
+      "required": ["key", "expiryDate", "status"]
+    },
+    "AdminConfig": {
+      "title": "Admin Configuration",
+      "description": "Global admin settings including changeable access PIN",
+      "type": "object",
+      "properties": {
+        "pin": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["pin"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User specific data synchronized by uid"
+    },
+    "/licenses/{licenseKey}": {
+      "schema": "License",
+      "description": "Application licenses for device binding"
+    },
+    "/admin_config/{configId}": {
+      "schema": "AdminConfig",
+      "description": "Global settings for security and administrative controls"
+    }
+  }
+}

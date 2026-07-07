@@ -4,11 +4,29 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
+import { initializeApp as initializeFirebaseApp } from "firebase/app";
+import { getFirestore as getFirebaseFirestore, doc as firebaseDoc, getDoc as getFirebaseDoc, updateDoc as firebaseUpdateDoc } from "firebase/firestore";
+import fs from "fs";
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
+
+// Initialize Firebase on Backend
+const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+let backendDb: any = null;
+
+if (fs.existsSync(configPath)) {
+  try {
+    const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    const firebaseApp = initializeFirebaseApp(firebaseConfig);
+    backendDb = getFirebaseFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+    console.log("Backend Firebase initialized successfully.");
+  } catch (err) {
+    console.error("Failed to initialize Firebase on backend:", err);
+  }
+}
 
 // In-Memory storage for PDFs to share on WhatsApp
 const pdfStore = new Map<string, { buffer: Buffer; fileName: string; timestamp: number }>();
@@ -134,7 +152,7 @@ app.post("/api/gemini/generate", async (req, res) => {
 
     if (action === "expand-description") {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.1-flash-lite",
         contents: `Create a professional description (under 150 characters) for an Indian Tax Invoice of this product or service: "${prompt}". Focus on commercial terms, models, specification details or technical specs, suitable for a professional invoice item detail. Keep it extremely brief, direct, and without marketing buzzwords. No introductory text. Just the description.`,
       });
       return res.json({ text: response.text?.trim() });
@@ -164,7 +182,7 @@ app.post("/api/gemini/generate", async (req, res) => {
       };
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.1-flash-lite",
         contents: `Analyze the user's plain text prompt requesting an invoice or item additions: "${prompt}". Parse it into a structured invoice object containing customer details and item lists. Strictly match the specified JSON schema. Prompt: "${prompt}"`,
         config: {
           responseMimeType: "application/json",
@@ -207,7 +225,7 @@ app.post("/api/gemini/generate", async (req, res) => {
       };
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.1-flash-lite",
         contents: `Analyze the provided sales invoices and current products inventory data to determine sales trends and predict inventory restocking requirements.
 Invoices Data: ${JSON.stringify(context?.invoices || [])}
 Products Data: ${JSON.stringify(context?.products || [])}
@@ -233,7 +251,7 @@ Suggest strategies to increase revenue or handle outstanding bills.`;
       let chatContents = req.body.history || prompt;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.1-flash-lite",
         contents: chatContents,
         config: {
           systemInstruction,
@@ -253,7 +271,7 @@ Suggest strategies to increase revenue or handle outstanding bills.`;
 // Email Database Backup Endpoint
 app.post("/api/backup/email", async (req, res) => {
   try {
-    const { backupData, backupEmail, smtpSettings } = req.body;
+    const { backupData, backupEmail, smtpSettings, pdfBase64 } = req.body;
     
     if (!backupData) {
       return res.status(400).json({ success: false, error: "No backup data provided." });
@@ -283,6 +301,7 @@ app.post("/api/backup/email", async (req, res) => {
     const backupJsonString = typeof backupData === "string" ? backupData : JSON.stringify(backupData, null, 2);
     const dateStr = new Date().toISOString().split("T")[0];
     const filename = `dbillify_backup_${dateStr}.json`;
+    const pdfFilename = `dbillify_backup_${dateStr}.pdf`;
 
     if (transporter) {
       const mailOptions = {
@@ -290,13 +309,23 @@ app.post("/api/backup/email", async (req, res) => {
         to: emailToUse,
         subject: `D Billify Database Backup [${dateStr}]`,
         text: `Hello,\n\nPlease find attached the automated database backup file for the D Billify Invoicing System.\n\nBackup Date: ${new Date().toLocaleString()}\nFile Name: ${filename}\n\nYou can upload and restore this backup file at any time in Company Setup > Settings > Database & Backups.\n\nBest regards,\nYour Invoicing System Backup Service`,
-        attachments: [
-          {
-            filename,
-            content: backupJsonString,
-            contentType: "application/json"
+        attachments: (() => {
+          const atts: any[] = [
+            {
+              filename,
+              content: backupJsonString,
+              contentType: "application/json"
+            }
+          ];
+          if (pdfBase64) {
+            atts.push({
+              filename: pdfFilename,
+              content: Buffer.from(pdfBase64.replace(/^data:application\/pdf;filename=.*?;base64,/, ""), 'base64'),
+              contentType: "application/pdf"
+            });
           }
-        ]
+          return atts;
+        })()
       };
       
       await transporter.sendMail(mailOptions);
@@ -318,6 +347,70 @@ app.post("/api/backup/email", async (req, res) => {
   } catch (err: any) {
     console.error("Backup Email Error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to send backup email." });
+  }
+});
+
+// Secure Admin Login Verification Endpoint
+app.post("/api/admin/login", async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ success: false, error: "Password is required." });
+    }
+
+    let storedPin = "583914"; // default fallback
+
+    // DEBUG: Force PIN to 583914 for recovery
+    storedPin = "583914";
+
+    if (backendDb) {
+      const docRef = firebaseDoc(backendDb, "admin_config", "settings");
+      const docSnap = await getFirebaseDoc(docRef);
+      if (docSnap.exists()) {
+        storedPin = docSnap.data().pin || "583914";
+      }
+    }
+
+    if (password === storedPin) {
+      return res.json({ success: true, message: "Authentication successful." });
+    } else {
+      return res.status(401).json({ success: false, error: "Incorrect Administrator Password." });
+    }
+  } catch (err: any) {
+    console.error("Admin verification error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Internal server authentication error." });
+  }
+});
+
+// Secure Admin Password Update Endpoint
+app.post("/api/admin/update-password", async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, error: "Current and new passwords are required." });
+    }
+
+    let storedPin = "583914"; // default fallback
+
+    if (backendDb) {
+      const docRef = firebaseDoc(backendDb, "admin_config", "settings");
+      const docSnap = await getFirebaseDoc(docRef);
+      if (docSnap.exists()) {
+        storedPin = docSnap.data().pin || "583914";
+      }
+
+      if (currentPassword !== storedPin) {
+        return res.status(401).json({ success: false, error: "Current password is incorrect." });
+      }
+
+      await firebaseUpdateDoc(docRef, { pin: newPassword, updatedAt: new Date().toISOString() });
+      return res.json({ success: true, message: "Admin password updated successfully on server." });
+    } else {
+      return res.status(500).json({ success: false, error: "Database offline. Cannot update password." });
+    }
+  } catch (err: any) {
+    console.error("Admin password update error:", err);
+    return res.status(500).json({ success: false, error: err.message || "Internal server error during password update." });
   }
 });
 

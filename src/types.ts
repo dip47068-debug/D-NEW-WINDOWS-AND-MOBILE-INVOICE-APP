@@ -27,11 +27,15 @@ export interface BackupSettings {
   smtpSecure: boolean;
   smtpUser: string;
   smtpPass: string;
+  frequency?: 'Daily' | 'Weekly' | 'Monthly';
 }
 
 export interface UserProfile {
   mobile: string;
   email: string;
+  displayName?: string;
+  photoURL?: string;
+  googleUid?: string;
   passwordHash: string;
   securityPin: string;
   isLoggedIn: boolean;
@@ -105,6 +109,7 @@ export interface Invoice {
   paidAmount: number;
   balanceDue: number;
   paymentStatus: 'paid' | 'unpaid' | 'partial';
+  paymentMethod?: 'UPI' | 'Cash' | 'Credit' | 'Net Banking' | 'Card';
   notes?: string;
   stateOfSupply: string; // to determine CGST/SGST vs IGST
   changeLog?: InvoiceChangeLogEntry[];

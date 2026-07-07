@@ -38,7 +38,8 @@ import {
   QrCode,
   Smartphone,
   History,
-  Loader2
+  Loader2,
+  Bell
 } from 'lucide-react';
 import { Invoice, Contact, Product, InvoiceItem, CompanySettings, InvoiceChangeLogEntry } from '../types';
 import { useAuth } from '../lib/AuthContext';
@@ -186,7 +187,23 @@ export function A4InvoicePrintLayout({
               <span>{invoice.stateOfSupply || '-'}</span>
 
               <span className="font-bold">Payment Status:</span>
-              <span className="uppercase font-bold">{invoice.paymentStatus}</span>
+              <span className={`uppercase font-bold ${invoice.paymentStatus === 'paid' ? 'text-emerald-700' : 'text-red-600'}`}>
+                {invoice.paymentStatus === 'paid' ? 'PAID' : 'DUE'}
+              </span>
+
+              {invoice.paymentMethod && (
+                <>
+                  <span className="font-bold">Payment Method:</span>
+                  <span className="font-bold uppercase text-slate-800">{invoice.paymentMethod}</span>
+                </>
+              )}
+
+              {invoice.paymentStatus !== 'paid' && invoice.balanceDue !== undefined && invoice.balanceDue > 0 && (
+                <>
+                  <span className="font-bold text-red-650">Due Payment:</span>
+                  <span className="font-extrabold text-red-650 font-mono">₹{invoice.balanceDue.toFixed(2)}</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -307,7 +324,9 @@ export function A4InvoicePrintLayout({
                   </div>
                 </>
               ) : (
-                <div className="text-gray-400 italic text-[10px]">Payment Settlement Method: Cash / UPI / Card / NetBanking</div>
+                <div className="text-gray-800 font-semibold text-[10px]">
+                  Settled Via: <span className="uppercase font-bold">{invoice.paymentMethod || 'Cash'}</span> ({invoice.paymentStatus === 'paid' ? 'PAID' : 'DUE'})
+                </div>
               )}
             </div>
 
@@ -369,6 +388,18 @@ export function A4InvoicePrintLayout({
                 <div className="flex-1 p-2 border-r border-black font-black pl-3 uppercase">Net Amount</div>
                 <div className="w-[100px] p-2 text-right font-black pr-3">₹{Math.round(invoice.grandTotal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               </div>
+              {invoice.paidAmount !== undefined && (
+                <div className="flex border-b border-black text-[11px] font-bold text-slate-700 bg-slate-50">
+                  <div className="flex-1 p-1.5 border-r border-black pl-3 uppercase">Amount Paid</div>
+                  <div className="w-[100px] p-1.5 text-right pr-3 font-mono">₹{invoice.paidAmount.toFixed(2)}</div>
+                </div>
+              )}
+              {invoice.balanceDue !== undefined && invoice.balanceDue > 0 && (
+                <div className="flex border-b border-black text-[11px] font-extrabold text-red-600 bg-red-50">
+                  <div className="flex-1 p-1.5 border-r border-black pl-3 uppercase">Due Payment</div>
+                  <div className="w-[100px] p-1.5 text-right pr-3 font-mono">₹{invoice.balanceDue.toFixed(2)}</div>
+                </div>
+              )}
             </div>
 
             {/* Signature Area */}
@@ -462,6 +493,38 @@ export default function InvoicesView({
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [preFinalizeInvoice, setPreFinalizeInvoice] = useState<Invoice | null>(null);
   const [isPreviewDarkMode, setIsPreviewDarkMode] = useState(false);
+
+  // Payment Reminder States
+  const [reminderInvoice, setReminderInvoice] = useState<Invoice | null>(null);
+  const [reminderMethod, setReminderMethod] = useState<'whatsapp' | 'email'>('whatsapp');
+  const [reminderMessage, setReminderMessage] = useState('');
+  const [reminderSubject, setReminderSubject] = useState('');
+  const [reminderEmail, setReminderEmail] = useState('');
+
+  // Sync reminder templates when invoice or method changes
+  useEffect(() => {
+    if (!reminderInvoice) return;
+    const inv = reminderInvoice;
+    const balanceDue = inv.balanceDue !== undefined ? inv.balanceDue : (inv.grandTotal - (inv.paidAmount || 0));
+    
+    // Auto-fill recipient email from contacts if matches
+    const contactObj = contacts.find(c => c.id === inv.contactId);
+    if (contactObj?.email) {
+      setReminderEmail(contactObj.email);
+    } else {
+      setReminderEmail('');
+    }
+    
+    if (reminderMethod === 'whatsapp') {
+      const text = `Dear ${inv.contactName || 'Valued Customer'},\n\nThis is a friendly reminder that invoice *${inv.invoiceNumber}* from *${companySettings.companyName || 'D Billify'}* is unpaid.\n\nTotal Amount: ₹${inv.grandTotal.toLocaleString('en-IN')}\nAmount Paid: ₹${(inv.paidAmount || 0).toLocaleString('en-IN')}\nDue Balance: ₹${balanceDue.toLocaleString('en-IN')}\n\nDue Date: ${inv.dueDate || 'Immediate'}\n\nPlease settle the due amount at your earliest convenience. Thank you!\n\nRegards,\n${companySettings.companyName || 'D Billify'}`;
+      setReminderMessage(text);
+    } else {
+      const subject = `Payment Reminder: Invoice ${inv.invoiceNumber} from ${companySettings.companyName || 'D Billify'}`;
+      const text = `Dear ${inv.contactName || 'Valued Customer'},\n\nWe hope you are doing well.\n\nThis is a payment reminder for invoice ${inv.invoiceNumber}, which is currently overdue.\n\nInvoice Summary:\n- Invoice Number: ${inv.invoiceNumber}\n- Invoice Date: ${inv.date}\n- Due Date: ${inv.dueDate || 'Immediate'}\n- Total Invoice Value: ₹${inv.grandTotal.toLocaleString('en-IN')}\n- Amount Received: ₹${(inv.paidAmount || 0).toLocaleString('en-IN')}\n- Outstanding Balance: ₹${balanceDue.toLocaleString('en-IN')}\n\nPlease complete the payment at your earliest convenience. If you have already made the payment, please ignore this reminder.\n\nBest regards,\n${companySettings.companyName || 'D Billify'}`;
+      setReminderSubject(subject);
+      setReminderMessage(text);
+    }
+  }, [reminderInvoice, reminderMethod, companySettings.companyName, contacts]);
 
   // --- INVOICE CUSTOM DESIGN & FORMAT STYLE STATES & PRESET THEMES ---
   const [invoiceStyle, setInvoiceStyle] = useState(() => {
@@ -872,18 +935,36 @@ export default function InvoicesView({
   const [lineItems, setLineItems] = useState<InvoiceItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [notes, setNotes] = useState('');
+  const [paidAmount, setPaidAmount] = useState<number | string>(0);
+  const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'Cash' | 'Credit' | 'Net Banking' | 'Card'>('Cash');
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid'>('paid');
+
+  // Calculate overall totals using including GST calculation
+  const itemCalcs = lineItems.map(item => calculateInclusiveGST(item.rate, item.quantity, item.discount, item.gstRate));
+  const subtotalSum = itemCalcs.reduce((sum, c) => sum + c.grossTaxable, 0);
+  const discountSum = itemCalcs.reduce((sum, c) => sum + c.discountAmt, 0);
+  const cgstSum = itemCalcs.reduce((sum, c) => sum + c.cgst, 0);
+  const sgstSum = itemCalcs.reduce((sum, c) => sum + c.sgst, 0);
+  const igstSum = itemCalcs.reduce((sum, c) => sum + c.igst, 0);
+  const grandTotalResult = itemCalcs.reduce((sum, c) => sum + c.itemTotal, 0);
 
   // Customizable sales line details
   const [lineItemName, setLineItemName] = useState('');
   const [lineItemModel, setLineItemModel] = useState('');
   const [lineItemSerial, setLineItemSerial] = useState('');
   const [lineItemDesc, setLineItemDesc] = useState('');
-  const [lineItemQty, setLineItemQty] = useState<number>(1);
-  const [lineItemPcs, setLineItemPcs] = useState<number>(1);
+  const [lineItemQty, setLineItemQty] = useState<number | string>(1);
+  const [lineItemPcs, setLineItemPcs] = useState<number | string>(1);
   const [lineItemUnit, setLineItemUnit] = useState('PCS');
-  const [lineItemUnitPrice, setLineItemUnitPrice] = useState<number>(0);
+  const [lineItemUnitPrice, setLineItemUnitPrice] = useState<number | string>(0);
   const [lineItemGstRate, setLineItemGstRate] = useState<number>(18);
-  const [lineItemDiscount, setLineItemDiscount] = useState<number>(0);
+  const [lineItemDiscount, setLineItemDiscount] = useState<number | string>(0);
+
+  // Numeric helper variables for rendering and validation calculations
+  const activeRate = Number(lineItemUnitPrice) || 0;
+  const activeQty = Number(lineItemQty) || 0;
+  const activeDisc = Number(lineItemDiscount) || 0;
+  const activePcs = Number(lineItemPcs) || 0;
 
   // Handle product dropdown change to pre-fill row entry fields
   const handleProductChange = (productId: string) => {
@@ -920,6 +1001,13 @@ export default function InvoicesView({
   useEffect(() => {
     setFormType(activeTab);
   }, [activeTab]);
+
+  // Sync paidAmount with grandTotalResult if paymentStatus is paid
+  useEffect(() => {
+    if (paymentStatus === 'paid') {
+      setPaidAmount(grandTotalResult);
+    }
+  }, [grandTotalResult, paymentStatus]);
 
   // Handle contact drop-down change to auto-fill details
   const handleContactChange = (id: string) => {
@@ -985,6 +1073,9 @@ export default function InvoicesView({
     setLineItemUnitPrice(0);
     setLineItemGstRate(18);
     setLineItemDiscount(0);
+    setPaidAmount(0);
+    setPaymentMethod('Cash');
+    setPaymentStatus('paid');
     
     // Auto invoice number
     const suffix = Math.floor(100 + Math.random() * 900);
@@ -1013,6 +1104,9 @@ export default function InvoicesView({
     setLineItems(inv.items);
     setNotes(inv.notes || '');
     setStateOfSupply(inv.stateOfSupply);
+    setPaidAmount(inv.paidAmount !== undefined ? inv.paidAmount : inv.grandTotal);
+    setPaymentMethod(inv.paymentMethod || 'Cash');
+    setPaymentStatus(inv.paymentStatus === 'paid' ? 'paid' : 'unpaid');
     
     const hasCgst = inv.totalCgst > 0 || (inv.items && inv.items.some(item => item.cgst > 0));
     setGstMode(hasCgst ? 'local' : 'interstate');
@@ -1046,7 +1140,13 @@ export default function InvoicesView({
       alert('Please select a product or enter a valid Product Name.');
       return;
     }
-    if (lineItemQty <= 0) {
+
+    const qtyVal = Number(lineItemQty) || 0;
+    const pcsVal = Number(lineItemPcs) || 0;
+    const priceVal = Number(lineItemUnitPrice) || 0;
+    const discVal = Number(lineItemDiscount) || 0;
+
+    if (qtyVal <= 0) {
       alert('Quantity must be greater than zero.');
       return;
     }
@@ -1058,9 +1158,9 @@ export default function InvoicesView({
 
     // Calculate using including GST calculation
     const { cgst, sgst, igst, itemTotal } = calculateInclusiveGST(
-      lineItemUnitPrice,
-      lineItemQty,
-      lineItemDiscount,
+      priceVal,
+      qtyVal,
+      discVal,
       lineItemGstRate
     );
 
@@ -1071,15 +1171,15 @@ export default function InvoicesView({
       serialNumber: lineItemSerial || undefined,
       description: lineItemDesc || undefined,
       hsnCode: selectedProductId ? (products.find(p => p.id === selectedProductId)?.hsnCode || '8539') : '8539',
-      quantity: lineItemQty,
-      rate: lineItemUnitPrice,
-      discount: lineItemDiscount,
+      quantity: qtyVal,
+      rate: priceVal,
+      discount: discVal,
       gstRate: lineItemGstRate,
       cgst,
       sgst,
       igst,
       total: itemTotal,
-      pcs: lineItemPcs,
+      pcs: pcsVal || qtyVal,
       unit: lineItemUnit
     };
 
@@ -1112,15 +1212,6 @@ export default function InvoicesView({
     setLineItems(copy);
   };
 
-  // Calculate overall totals using including GST calculation
-  const itemCalcs = lineItems.map(item => calculateInclusiveGST(item.rate, item.quantity, item.discount, item.gstRate));
-  const subtotalSum = itemCalcs.reduce((sum, c) => sum + c.grossTaxable, 0);
-  const discountSum = itemCalcs.reduce((sum, c) => sum + c.discountAmt, 0);
-  const cgstSum = itemCalcs.reduce((sum, c) => sum + c.cgst, 0);
-  const sgstSum = itemCalcs.reduce((sum, c) => sum + c.sgst, 0);
-  const igstSum = itemCalcs.reduce((sum, c) => sum + c.igst, 0);
-  const grandTotalResult = itemCalcs.reduce((sum, c) => sum + c.itemTotal, 0);
-
   // Save the full invoice
   const handleSaveSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1133,10 +1224,15 @@ export default function InvoicesView({
 
     // Auto-commit active input line if filled but not added
     if (lineItemName.trim()) {
+      const saveQtyVal = Number(lineItemQty) || 0;
+      const savePcsVal = Number(lineItemPcs) || 0;
+      const savePriceVal = Number(lineItemUnitPrice) || 0;
+      const saveDiscVal = Number(lineItemDiscount) || 0;
+
       const { cgst, sgst, igst, itemTotal } = calculateInclusiveGST(
-        lineItemUnitPrice,
-        lineItemQty,
-        lineItemDiscount,
+        savePriceVal,
+        saveQtyVal,
+        saveDiscVal,
         lineItemGstRate
       );
 
@@ -1147,15 +1243,15 @@ export default function InvoicesView({
         serialNumber: lineItemSerial || undefined,
         description: lineItemDesc || undefined,
         hsnCode: selectedProductId ? (products.find(p => p.id === selectedProductId)?.hsnCode || '8539') : '8539',
-        quantity: lineItemQty,
-        rate: lineItemUnitPrice,
-        discount: lineItemDiscount,
+        quantity: saveQtyVal,
+        rate: savePriceVal,
+        discount: saveDiscVal,
         gstRate: lineItemGstRate,
         cgst,
         sgst,
         igst,
         total: itemTotal,
-        pcs: lineItemPcs,
+        pcs: savePcsVal || saveQtyVal,
         unit: lineItemUnit
       };
 
@@ -1218,9 +1314,10 @@ export default function InvoicesView({
       totalSgst: parseFloat(finalSgstSum.toFixed(2)),
       totalIgst: parseFloat(finalIgstSum.toFixed(2)),
       grandTotal: finalGrandTotal,
-      paidAmount: finalGrandTotal, // default fully paid for easy simulation, editable or settled
-      balanceDue: 0,
-      paymentStatus: 'paid',
+      paidAmount: paymentStatus === 'paid' ? finalGrandTotal : (Number(paidAmount) || 0),
+      balanceDue: Math.max(0, finalGrandTotal - (paymentStatus === 'paid' ? finalGrandTotal : (Number(paidAmount) || 0))),
+      paymentStatus: paymentStatus,
+      paymentMethod: paymentMethod,
       notes,
       stateOfSupply
     };
@@ -1588,7 +1685,7 @@ export default function InvoicesView({
       // Capture full resolution image
       const imgData = await htmlToImage.toJpeg(printArea, {
         quality: 1.0,
-        pixelRatio: 2
+        pixelRatio: 3
       });
       
       printArea.style.boxShadow = originalShadow;
@@ -1881,7 +1978,11 @@ export default function InvoicesView({
         doc.setTextColor(71, 85, 105);
       }
 
-      doc.text(`Status of Bill: ${inv.paymentStatus.toUpperCase()}`, 120, y + 15);
+      const pdfPaymentStatusText = inv.paymentStatus === 'paid' ? 'PAID' : 'DUE';
+      doc.text(`Status of Bill: ${pdfPaymentStatusText}`, 120, y + 15);
+      if (inv.paymentMethod) {
+        doc.text(`Payment Method: ${inv.paymentMethod.toUpperCase()}`, 120, y + 19);
+      }
 
       y += 32;
 
@@ -2122,8 +2223,44 @@ export default function InvoicesView({
       doc.text("INVOICE GRAND TOTAL:", 120, taxIncY + 9.5);
       doc.text(formatRupeeForPdf(inv.grandTotal), valX - 2, taxIncY + 9.5, { align: 'right' });
 
+      // Clean Payment/Settlement breakdown underneath grand total
+      let paymentDetailsY = taxIncY + 17;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+
+      // Print status and details
+      doc.text("Payment Status:", labelX, paymentDetailsY, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      const finalStatusText = inv.paymentStatus === 'paid' ? 'PAID' : 'DUE';
+      doc.text(finalStatusText, valX, paymentDetailsY, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      paymentDetailsY += 5;
+
+      if (inv.paymentMethod) {
+        doc.text("Payment Method:", labelX, paymentDetailsY, { align: 'right' });
+        doc.text(inv.paymentMethod.toUpperCase(), valX, paymentDetailsY, { align: 'right' });
+        paymentDetailsY += 5;
+      }
+
+      if (inv.paidAmount !== undefined) {
+        doc.text("Amount Paid:", labelX, paymentDetailsY, { align: 'right' });
+        doc.text(formatRupeeForPdf(inv.paidAmount), valX, paymentDetailsY, { align: 'right' });
+        paymentDetailsY += 5;
+      }
+
+      if (inv.balanceDue !== undefined && inv.balanceDue > 0) {
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(220, 38, 38); // red-600
+        doc.text("Due Payment:", labelX, paymentDetailsY, { align: 'right' });
+        doc.text(formatRupeeForPdf(inv.balanceDue), valX, paymentDetailsY, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        paymentDetailsY += 5;
+      }
+
       // Clean Signature Section underneath
-      y = taxIncY + 20;
+      y = paymentDetailsY + 8;
       if (y > 255) {
         doc.addPage();
         pageNum++;
@@ -2591,6 +2728,16 @@ export default function InvoicesView({
                           >
                             <Eye className="h-4 w-4" />
                           </button>
+                          {inv.paymentStatus !== 'paid' && (
+                            <button
+                              id={`btn-reminder-${inv.id}`}
+                              onClick={() => setReminderInvoice(inv)}
+                              className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                              title="Send Payment Reminder"
+                            >
+                              <Bell className="h-4 w-4" />
+                            </button>
+                          )}
                           <button
                             id={`btn-dl-direct-${inv.id}`}
                             onClick={() => generateSnapshotPdf(inv)}
@@ -3102,10 +3249,25 @@ export default function InvoicesView({
                     min={1}
                     value={lineItemQty}
                     onChange={(e) => {
-                      const val = Math.max(1, Number(e.target.value));
-                      setLineItemQty(val);
-                      // Default pieces (pcs) to equal quantity
-                      setLineItemPcs(val);
+                      const valStr = e.target.value;
+                      if (valStr === '') {
+                        setLineItemQty('');
+                        setLineItemPcs('');
+                      } else {
+                        const parsed = Number(valStr);
+                        if (!isNaN(parsed)) {
+                          setLineItemQty(parsed);
+                          setLineItemPcs(parsed);
+                        }
+                      }
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={() => {
+                      const finalQty = Number(lineItemQty) || 1;
+                      setLineItemQty(finalQty);
+                      if (lineItemPcs === '') {
+                        setLineItemPcs(finalQty);
+                      }
                     }}
                     className="block w-full px-3 py-2 border border-slate-200 bg-white rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-orange-500"
                   />
@@ -3121,7 +3283,21 @@ export default function InvoicesView({
                     type="number"
                     min={1}
                     value={lineItemPcs}
-                    onChange={(e) => setLineItemPcs(Math.max(1, Number(e.target.value)))}
+                    onChange={(e) => {
+                      const valStr = e.target.value;
+                      if (valStr === '') {
+                        setLineItemPcs('');
+                      } else {
+                        const parsed = Number(valStr);
+                        if (!isNaN(parsed)) {
+                          setLineItemPcs(parsed);
+                        }
+                      }
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={() => {
+                      setLineItemPcs(Number(lineItemPcs) || 1);
+                    }}
                     className="block w-full px-3 py-2 border border-slate-200 bg-white rounded-xl text-xs font-mono focus:outline-none focus:border-orange-500"
                   />
                 </div>
@@ -3152,7 +3328,19 @@ export default function InvoicesView({
                     min={0}
                     step="0.01"
                     value={lineItemUnitPrice}
-                    onChange={(e) => setLineItemUnitPrice(Math.max(0, Number(e.target.value)))}
+                    onChange={(e) => {
+                      const valStr = e.target.value;
+                      if (valStr === '') {
+                        setLineItemUnitPrice('');
+                      } else {
+                        setLineItemUnitPrice(valStr);
+                      }
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={() => {
+                      const numVal = parseFloat(String(lineItemUnitPrice));
+                      setLineItemUnitPrice(isNaN(numVal) ? 0 : Math.max(0, numVal));
+                    }}
                     className="block w-full px-3 py-2 border border-slate-200 bg-white rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-orange-500 text-orange-650"
                   />
                 </div>
@@ -3187,7 +3375,21 @@ export default function InvoicesView({
                     min={0}
                     max={100}
                     value={lineItemDiscount}
-                    onChange={(e) => setLineItemDiscount(Math.max(0, Math.min(100, Number(e.target.value))))}
+                    onChange={(e) => {
+                      const valStr = e.target.value;
+                      if (valStr === '') {
+                        setLineItemDiscount('');
+                      } else {
+                        const parsed = parseFloat(valStr);
+                        if (!isNaN(parsed)) {
+                          setLineItemDiscount(Math.max(0, Math.min(100, parsed)));
+                        }
+                      }
+                    }}
+                    onFocus={(e) => e.target.select()}
+                    onBlur={() => {
+                      setLineItemDiscount(Number(lineItemDiscount) || 0);
+                    }}
                     className="block w-full px-3 py-2 border border-slate-200 bg-white rounded-xl text-xs font-mono focus:outline-none focus:border-orange-500"
                   />
                 </div>
@@ -3203,18 +3405,18 @@ export default function InvoicesView({
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-slate-700">
                     <span className="bg-slate-50 px-2 py-1 rounded border">
-                      Excl. Tax Price: <strong>₹{(lineItemUnitPrice * (1 - lineItemDiscount / 100)).toFixed(2)}</strong>
+                      Excl. Tax Price: <strong>₹{(activeRate * (1 - activeDisc / 100)).toFixed(2)}</strong>
                     </span>
                     <span className="bg-orange-50/50 text-orange-850 px-2 py-1 rounded border border-orange-100 font-semibold">
-                      Incl. Tax Price (CGST + SGST): <strong>₹{(lineItemUnitPrice * (1 + lineItemGstRate / 100) * (1 - lineItemDiscount / 100)).toFixed(2)}</strong>
+                      Incl. Tax Price (CGST + SGST): <strong>₹{(activeRate * (1 + lineItemGstRate / 100) * (1 - activeDisc / 100)).toFixed(2)}</strong>
                     </span>
                     <span className="text-slate-400">|</span>
                     <span>
-                      Line Subtotal: <strong>₹{(lineItemUnitPrice * lineItemQty).toFixed(2)}</strong>
+                      Line Subtotal: <strong>₹{(activeRate * activeQty).toFixed(2)}</strong>
                     </span>
                     <span className="text-slate-400">|</span>
                     <span>
-                      Line Total GST: <strong>₹{((lineItemUnitPrice * lineItemQty * (1 - lineItemDiscount / 100)) * (lineItemGstRate / 100)).toFixed(2)}</strong>
+                      Line Total GST: <strong>₹{((activeRate * activeQty * (1 - activeDisc / 100)) * (lineItemGstRate / 100)).toFixed(2)}</strong>
                     </span>
                   </div>
                 </div>
@@ -3320,63 +3522,169 @@ export default function InvoicesView({
           </div>
 
           {/* Notes and Grand Calculations */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-4 border-t border-slate-100">
-            <div className="lg:col-span-7">
-              <label className="block text-xs font-bold text-slate-700 mb-1">Invoice Notes / Terms Override</label>
-              <textarea
-                id="form-notes"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="block w-full p-3 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-slate-50/40"
-                placeholder="Optional notes or declarations specifically printed on customer's A4 invoice layout..."
-              />
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-6 pb-6 border-t border-slate-200">
+            {/* Left side: Notes + Payment Details panel (increasing height & details space) */}
+            <div className="lg:col-span-7 space-y-5">
+              {/* Invoice Notes */}
+              <div>
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1.5">Invoice Notes / Terms Override</label>
+                <textarea
+                  id="form-notes"
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="block w-full p-3 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-orange-500 bg-slate-50/40"
+                  placeholder="Optional notes or declarations printed on customer's A4 invoice layout..."
+                />
+              </div>
+
+              {/* Labeled Payment Details Panel - Slightly taller & spacious */}
+              <div className="p-5 bg-slate-50 border border-slate-150 rounded-2xl space-y-4 shadow-sm">
+                <h4 className="text-xs font-extrabold uppercase tracking-widest text-slate-800 flex items-center gap-1.5 border-b pb-2">
+                  <span>💳 Payment & Settlement Settings</span>
+                </h4>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Payment Method Dropdown */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5">Payment Method</label>
+                    <select
+                      id="form-payment-method"
+                      value={paymentMethod}
+                      onChange={(e) => setPaymentMethod(e.target.value as any)}
+                      className="block w-full px-3.5 py-2.5 border border-slate-250 bg-white rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 cursor-pointer text-slate-800"
+                    >
+                      <option value="UPI">UPI</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Credit">Credit</option>
+                      <option value="Net Banking">Net Banking</option>
+                      <option value="Card">Card</option>
+                    </select>
+                  </div>
+
+                  {/* Payment Status Dropdown */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5">Payment Status</label>
+                    <select
+                      id="form-payment-status"
+                      value={paymentStatus}
+                      onChange={(e) => {
+                        const status = e.target.value as 'paid' | 'unpaid';
+                        setPaymentStatus(status);
+                        if (status === 'paid') {
+                          setPaidAmount(grandTotalResult);
+                        } else {
+                          setPaidAmount(0);
+                        }
+                      }}
+                      className="block w-full px-3.5 py-2.5 border border-slate-250 bg-white rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 cursor-pointer text-slate-800"
+                    >
+                      <option value="paid">Paid</option>
+                      <option value="unpaid">Due</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  {/* Amount Paid Input */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5">Amount Paid (₹)</label>
+                    <input
+                      id="form-paid-amount"
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={paidAmount}
+                      onChange={(e) => {
+                        const valStr = e.target.value;
+                        if (valStr === '') {
+                          setPaidAmount('');
+                          setPaymentStatus('unpaid');
+                        } else {
+                          const val = parseFloat(valStr);
+                          if (!isNaN(val)) {
+                            setPaidAmount(valStr);
+                            if (val >= grandTotalResult && grandTotalResult > 0) {
+                              setPaymentStatus('paid');
+                            } else {
+                              setPaymentStatus('unpaid');
+                            }
+                          }
+                        }
+                      }}
+                      onFocus={(e) => e.target.select()}
+                      onBlur={() => {
+                        const numVal = parseFloat(String(paidAmount));
+                        const finalVal = isNaN(numVal) ? 0 : Math.max(0, numVal);
+                        setPaidAmount(finalVal);
+                        if (finalVal >= grandTotalResult && grandTotalResult > 0) {
+                          setPaymentStatus('paid');
+                        } else {
+                          setPaymentStatus('unpaid');
+                        }
+                      }}
+                      className="block w-full px-3.5 py-2.5 border border-slate-250 bg-white rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 text-slate-800"
+                      placeholder="Enter amount paid"
+                    />
+                  </div>
+
+                  {/* Due Payment Field */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1.5">Due Payment</label>
+                    <div className="block w-full px-3.5 py-2.5 border border-slate-150 bg-slate-100 rounded-xl text-xs font-extrabold text-red-600 font-mono">
+                      ₹{Math.max(0, grandTotalResult - Number(paidAmount)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Calculations and Breakdown Summary */}
-            <div className="lg:col-span-5 bg-slate-50 p-4 rounded-2xl border border-slate-150 text-slate-700 space-y-2.5">
-              <h5 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest border-b pb-1.5">Compliance Summary</h5>
-              
-              <div className="flex justify-between text-xs">
-                <span>Subtotal Value:</span>
-                <span className="font-mono font-bold text-slate-900">₹{subtotalSum.toFixed(2)}</span>
-              </div>
-
-              {discountSum > 0 && (
-                <div className="flex justify-between text-xs text-red-600">
-                  <span>Custom Discount:</span>
-                  <span className="font-mono font-bold">-₹{discountSum.toFixed(2)}</span>
+            <div className="lg:col-span-5 bg-slate-50 p-5 rounded-2xl border border-slate-150 text-slate-700 flex flex-col justify-between min-h-[300px]">
+              <div className="space-y-2.5">
+                <h5 className="text-xs font-extrabold text-slate-800 uppercase tracking-widest border-b pb-2">Compliance Summary</h5>
+                
+                <div className="flex justify-between text-xs">
+                  <span>Subtotal Value:</span>
+                  <span className="font-mono font-bold text-slate-900">₹{subtotalSum.toFixed(2)}</span>
                 </div>
-              )}
 
-              {cgstSum > 0 && (
-                <div className="flex justify-between text-xs text-slate-500">
-                  <span>CGST Total:</span>
-                  <span className="font-mono">₹{cgstSum.toFixed(2)}</span>
+                {discountSum > 0 && (
+                  <div className="flex justify-between text-xs text-red-600">
+                    <span>Custom Discount:</span>
+                    <span className="font-mono font-bold">-₹{discountSum.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {cgstSum > 0 && (
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>CGST Total:</span>
+                    <span className="font-mono">₹{cgstSum.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {sgstSum > 0 && (
+                  <div className="flex justify-between text-xs text-slate-500">
+                    <span>SGST Total:</span>
+                    <span className="font-mono">₹{sgstSum.toFixed(2)}</span>
+                  </div>
+                )}
+
+                {(cgstSum + sgstSum) > 0 && (
+                  <div className="flex justify-between text-xs text-orange-600 font-bold border-t border-dashed pt-2 mt-2">
+                    <span>Total GST Value:</span>
+                    <span className="font-mono">₹{(cgstSum + sgstSum).toFixed(2)}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between text-sm font-extrabold text-orange-600 border-t pt-2.5 mt-2.5">
+                  <span>Grand Total (INR):</span>
+                  <span className="font-mono text-base">₹{grandTotalResult.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                 </div>
-              )}
-
-              {sgstSum > 0 && (
-                <div className="flex justify-between text-xs text-slate-500">
-                  <span>SGST Total:</span>
-                  <span className="font-mono">₹{sgstSum.toFixed(2)}</span>
-                </div>
-              )}
-
-              {(cgstSum + sgstSum) > 0 && (
-                <div className="flex justify-between text-xs text-orange-600 font-bold border-t border-dashed pt-1.5 mt-1.5">
-                  <span>Total GST Value:</span>
-                  <span className="font-mono">₹{(cgstSum + sgstSum).toFixed(2)}</span>
-                </div>
-              )}
-
-              <div className="flex justify-between text-sm font-extrabold text-orange-600 border-t pt-2 mt-2">
-                <span>Grand Total (INR):</span>
-                <span className="font-mono text-base">₹{grandTotalResult.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
               </div>
 
               {/* Submit panel */}
-              <div className="pt-3 flex gap-2">
+              <div className="pt-4 flex gap-2.5 border-t border-slate-200/60 mt-4">
                 <button
                   id="btn-save-invoice-form"
                   type="submit"
@@ -3461,6 +3769,17 @@ export default function InvoicesView({
               >
                 <Share2 className="h-4 w-4" /> Email Link
               </a>
+              {viewingInvoice!.paymentStatus !== 'paid' && (
+                <button
+                  id="btn-preview-reminder"
+                  onClick={() => setReminderInvoice(viewingInvoice!)}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  title="Send Payment Reminder"
+                >
+                  <Bell className="h-4 w-4 text-white" />
+                  <span>Send Reminder</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -5298,6 +5617,169 @@ export default function InvoicesView({
                   Generated from EXPERT Accounting Software
                 </div>
               </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {reminderInvoice && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 overflow-y-auto p-4 sm:p-6 md:p-8 flex justify-center items-center">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 max-w-lg w-full shadow-2xl space-y-6">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b pb-4">
+              <div className="space-y-1">
+                <span className="bg-amber-50 text-amber-850 text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border border-amber-200">
+                  Payment Reminder
+                </span>
+                <h3 className="font-black text-slate-900 text-lg">
+                  Send Due Reminder
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReminderInvoice(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Party Details Summary */}
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150 text-xs space-y-1.5">
+              <p className="text-slate-500 font-bold uppercase tracking-wider text-[10px]">Recipient Details</p>
+              <div className="grid grid-cols-2 gap-2 text-slate-800">
+                <div>
+                  <span className="font-semibold text-slate-500">Party Name:</span>
+                  <p className="font-bold">{reminderInvoice.contactName}</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-500">Invoice Ref:</span>
+                  <p className="font-mono font-bold">#{reminderInvoice.invoiceNumber}</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-500">Mobile:</span>
+                  <p className="font-bold">{reminderInvoice.contactMobile || '-'}</p>
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-500">Balance Due:</span>
+                  <p className="font-extrabold text-red-600 font-mono">
+                    ₹{(reminderInvoice.balanceDue !== undefined ? reminderInvoice.balanceDue : (reminderInvoice.grandTotal - (reminderInvoice.paidAmount || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Template Channel Selector tabs */}
+            <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => setReminderMethod('whatsapp')}
+                className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  reminderMethod === 'whatsapp'
+                    ? 'bg-white text-emerald-700 shadow-xs border border-emerald-100'
+                    : 'text-slate-600 hover:text-slate-800 hover:bg-white/50'
+                }`}
+              >
+                <Smartphone className="h-4 w-4" />
+                <span>WhatsApp Template</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setReminderMethod('email')}
+                className={`flex-1 py-2 px-3 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  reminderMethod === 'email'
+                    ? 'bg-white text-indigo-700 shadow-xs border border-indigo-100'
+                    : 'text-slate-600 hover:text-slate-800 hover:bg-white/50'
+                }`}
+              >
+                <Share2 className="h-4 w-4" />
+                <span>Email Template</span>
+              </button>
+            </div>
+
+            {/* Template Fields */}
+            <div className="space-y-4">
+              {reminderMethod === 'email' && (
+                <div>
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1.5">Recipient Email</label>
+                  <input
+                    type="email"
+                    value={reminderEmail}
+                    onChange={(e) => setReminderEmail(e.target.value)}
+                    className="block w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500"
+                    placeholder="Enter customer email address..."
+                  />
+                </div>
+              )}
+
+              {reminderMethod === 'email' && (
+                <div>
+                  <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1.5">Email Subject</label>
+                  <input
+                    type="text"
+                    value={reminderSubject}
+                    onChange={(e) => setReminderSubject(e.target.value)}
+                    className="block w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-indigo-500 font-bold"
+                    placeholder="Subject..."
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 mb-1.5">Custom Message Body</label>
+                <textarea
+                  rows={6}
+                  value={reminderMessage}
+                  onChange={(e) => setReminderMessage(e.target.value)}
+                  className="block w-full p-3 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500 bg-slate-50/40 leading-relaxed font-medium"
+                  placeholder="Type your reminder message..."
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="flex items-center gap-3 border-t pt-4">
+              <button
+                type="button"
+                onClick={() => setReminderInvoice(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all cursor-pointer text-center"
+              >
+                Cancel
+              </button>
+              
+              {reminderMethod === 'whatsapp' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cleanMobile = reminderInvoice.contactMobile.replace(/\D/g, '');
+                    const formattedMobile = cleanMobile.length === 10 ? `91${cleanMobile}` : cleanMobile;
+                    const whatsappUrl = `https://wa.me/${formattedMobile}?text=${encodeURIComponent(reminderMessage)}`;
+                    window.open(whatsappUrl, '_blank');
+                    setReminderInvoice(null);
+                  }}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Send className="h-4 w-4" />
+                  <span>Send WhatsApp</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const mailToSubject = encodeURIComponent(reminderSubject);
+                    const mailToBody = encodeURIComponent(reminderMessage);
+                    const mailtoUrl = `mailto:${reminderEmail}?subject=${mailToSubject}&body=${mailToBody}`;
+                    window.open(mailtoUrl, '_blank');
+                    setReminderInvoice(null);
+                  }}
+                  className="flex-1 py-2.5 bg-indigo-650 hover:bg-indigo-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Send className="h-4 w-4" />
+                  <span>Send Email</span>
+                </button>
+              )}
             </div>
 
           </div>
